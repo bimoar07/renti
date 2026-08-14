@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Env secrets — JANGAN commit .env
+.env
+.env.local
+
+# Android / Gradle
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Deliverables besar / video (dikompres manual saat unggah)
+*.zip
+*.rar
+*.mp4
+*.mov
+proposal/assets/videos/
+
+# Hermes local config — JANGAN commit
+.hermes/
