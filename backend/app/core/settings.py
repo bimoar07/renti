@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     llm_primary_provider: str = "gemini/gemini-2.0-flash"
     llm_fallback_provider: str = "groq/llama-3.3-70b-versatile"
+    # Team ID Gemastik & SQLite database path
+    team_id: str = "RENTI-TEAM-01"
+    db_path: str = "renti.db"
     # Crisis/referral contact (verify before public demo - see TAHAPAN PEMBELAJARAN §9).
     crisis_hotline: str = "119"
 
@@ -19,3 +22,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+

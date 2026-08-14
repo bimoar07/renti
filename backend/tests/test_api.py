@@ -37,6 +37,53 @@ class ChatApiTest(unittest.TestCase):
         self.assertEqual(body["policy_action"], "ALLOW")
         self.assertIn("conversation_id", body)
         self.assertIn("reply", body)
+        self.assertEqual(body["memory"]["context_tags"]["location"], "warkop")
+
+    def test_chat_contemplation_stage_routing(self):
+        cid = self._make_conversation(readiness="contemplation")
+        r = self.client.post(
+            "/api/v1/chat",
+            json={
+                "user_id": "u1",
+                "conversation_id": cid,
+                "message": "Pengin ngerokok lagi tapi masih galau.",
+            },
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["route"], "zone_1_contemplation")
+        self.assertEqual(body["policy_action"], "ALLOW")
+
+    def test_chat_emotional_venting(self):
+        cid = self._make_conversation()
+        r = self.client.post(
+            "/api/v1/chat",
+            json={
+                "user_id": "u1",
+                "conversation_id": cid,
+                "message": "Stres banget hari ini banyak masalah.",
+            },
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["route"], "zone_2_emotional")
+        self.assertEqual(body["policy_action"], "ALLOW")
+
+    def test_chat_refusal_script(self):
+        cid = self._make_conversation()
+        r = self.client.post(
+            "/api/v1/chat",
+            json={
+                "user_id": "u1",
+                "conversation_id": cid,
+                "message": "Gimana cara tolak ajakan rokok di tongkrongan?",
+            },
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["route"], "refusal_script")
+        self.assertEqual(body["intent"], "social_refusal")
+        self.assertEqual(body["policy_action"], "ALLOW")
 
     def test_chat_crisis_blocks_and_signposts(self):
         cid = self._make_conversation()
@@ -48,6 +95,7 @@ class ChatApiTest(unittest.TestCase):
         body = r.json()
         self.assertEqual(body["policy_action"], "BLOCK_AND_SIGNPOST")
         self.assertEqual(body["route"], "crisis")
+        self.assertIn("119", body["reply"])
 
     def test_chat_out_of_scope_redirects(self):
         cid = self._make_conversation()

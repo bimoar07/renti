@@ -1,5 +1,7 @@
 # Keputusan Arsitektur Renti (ADR) — Ringkasan
 
+> Bagian dari konfigurasi agent repo (lihat `../AGENTS.md` → "Domain docs"). Aturan bagaimana agent membaca `CONTEXT.md` & ADR dijelaskan di [`../docs/agents/domain.md`](../docs/agents/domain.md).
+
 > Ringkasan ADR yang relevan untuk implementasi monorepo. Detail & diskusi penuh ada di `catatan_keputusan_llm_application.md` (di luar repo, folder proyek).
 
 | ADR | Keputusan | Dampak ke struktur repo |
