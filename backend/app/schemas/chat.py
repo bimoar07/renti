@@ -1,16 +1,16 @@
-"""Pydantic schemas untuk endpoint chatbot & memory."""
-from typing import Literal, Optional
+"""Pydantic schemas untuk endpoint chatbot & memory (re-exports memory schemas)."""
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
-ReadinessStage = Literal["precontemplation", "contemplation", "action", "maintenance", "relapse"]
-PolicyAction = Literal["ALLOW", "SAFE_REDIRECT", "CLARIFY", "BLOCK_AND_SIGNPOST"]
-ZoneRoute = Literal["zone_1_craving", "zone_1_contemplation", "zone_2_emotional", "zone_3_out_of_scope", "refusal_script", "crisis"]
-
-
-class ClientContext(BaseModel):
-    location_chip: Optional[str] = None
-    offline: bool = False
+from app.schemas.memory import (
+    ClientContext,
+    MemoryInfo,
+    PolicyAction,
+    ReadinessStage,
+    RollingSummary,
+    ZoneRoute,
+)
 
 
 class ConversationCreate(BaseModel):
@@ -23,11 +23,6 @@ class ChatRequest(BaseModel):
     conversation_id: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1)
     client_context: ClientContext = ClientContext()
-
-
-class MemoryInfo(BaseModel):
-    updated: bool
-    context_tags: dict[str, str] = {}
 
 
 class ProviderInfo(BaseModel):
@@ -51,3 +46,18 @@ class ConversationResponse(BaseModel):
     user_id: str
     readiness_stage: ReadinessStage
     created_at: str
+
+
+__all__ = [
+    "ReadinessStage",
+    "PolicyAction",
+    "ZoneRoute",
+    "ClientContext",
+    "MemoryInfo",
+    "RollingSummary",
+    "ConversationCreate",
+    "ChatRequest",
+    "ProviderInfo",
+    "ChatResponse",
+    "ConversationResponse",
+]
