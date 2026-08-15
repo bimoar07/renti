@@ -1,4 +1,4 @@
-"""Tests for SQLiteStore persistence and conversation tracking."""
+"""Tests for SQLiteStore persistence, tone tracking, and readiness events (T4 #5)."""
 import os
 import tempfile
 import unittest
@@ -16,14 +16,16 @@ class TestSQLiteStore(unittest.TestCase):
         self.tmp_dir.cleanup()
 
     def test_create_and_get_conversation(self):
-        conv = self.store.create_conversation("c-1", "u-1", "action")
+        conv = self.store.create_conversation("c-1", "u-1", "action", tone="casual")
         self.assertEqual(conv["conversation_id"], "c-1")
         self.assertEqual(conv["readiness_stage"], "action")
+        self.assertEqual(conv["tone"], "casual")
 
         fetched = self.store.get_conversation("c-1")
         self.assertIsNotNone(fetched)
         self.assertEqual(fetched["user_id"], "u-1")
         self.assertEqual(fetched["readiness_stage"], "action")
+        self.assertEqual(fetched["tone"], "casual")
         self.assertTrue(self.store.conversation_exists("c-1"))
 
     def test_update_readiness(self):
@@ -31,6 +33,40 @@ class TestSQLiteStore(unittest.TestCase):
         self.store.update_readiness("c-2", "action")
         fetched = self.store.get_conversation("c-2")
         self.assertEqual(fetched["readiness_stage"], "action")
+
+    def test_update_tone(self):
+        self.store.create_conversation("c-tone", "u-tone", "contemplation", tone="standard")
+        self.store.update_tone("c-tone", "casual")
+        fetched = self.store.get_conversation("c-tone")
+        self.assertEqual(fetched["tone"], "casual")
+
+    def test_readiness_events_lifecycle(self):
+        self.store.create_conversation("c-events", "u-events", "contemplation")
+        event1 = self.store.record_readiness_event(
+            conversation_id="c-events",
+            from_stage="contemplation",
+            to_stage="action",
+            evidence="Pengguna mengatakan sudah 2 hari tidak merokok.",
+        )
+        self.assertIn("id", event1)
+        self.assertEqual(event1["from_stage"], "contemplation")
+        self.assertEqual(event1["to_stage"], "action")
+        self.assertIn("2 hari", event1["evidence"])
+
+        event2 = self.store.record_readiness_event(
+            conversation_id="c-events",
+            from_stage="action",
+            to_stage="relapse",
+            evidence="Pengguna merokok saat stres lembur.",
+        )
+        self.assertEqual(event2["to_stage"], "relapse")
+
+        events = self.store.get_readiness_events("c-events")
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["from_stage"], "contemplation")
+        self.assertEqual(events[0]["to_stage"], "action")
+        self.assertEqual(events[1]["from_stage"], "action")
+        self.assertEqual(events[1]["to_stage"], "relapse")
 
     def test_add_and_retrieve_messages(self):
         self.store.create_conversation("c-3", "u-3", "action")

@@ -1,4 +1,4 @@
-"""SQLite persistent storage for conversations, messages, and state (ADR 02)."""
+"""SQLite persistent storage for conversations, messages, state, and readiness events (ADR 02, 06)."""
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
@@ -30,6 +30,7 @@ class SQLiteStore:
                     conversation_id TEXT PRIMARY KEY,
                     user_id TEXT NOT NULL,
                     readiness_stage TEXT NOT NULL DEFAULT 'contemplation',
+                    tone TEXT NOT NULL DEFAULT 'standard',
                     summary TEXT NOT NULL DEFAULT '',
                     context_tags_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
@@ -49,8 +50,24 @@ class SQLiteStore:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_messages_conv_id ON messages(conversation_id);
+
+                CREATE TABLE IF NOT EXISTS readiness_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id TEXT NOT NULL,
+                    from_stage TEXT NOT NULL,
+                    to_stage TEXT NOT NULL,
+                    evidence TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_readiness_events_conv_id ON readiness_events(conversation_id);
                 """
             )
+            # Safe migration: ensure 'tone' column exists if table was created in older schema
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()]
+            if "tone" not in columns:
+                conn.execute("ALTER TABLE conversations ADD COLUMN tone TEXT NOT NULL DEFAULT 'standard';")
             conn.commit()
 
     def create_conversation(
@@ -58,26 +75,29 @@ class SQLiteStore:
         conversation_id: str,
         user_id: str,
         readiness_stage: str = "contemplation",
+        tone: str = "standard",
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             conn.execute(
                 """
                 INSERT INTO conversations (
-                    conversation_id, user_id, readiness_stage, summary, context_tags_json, created_at, updated_at
-                ) VALUES (?, ?, ?, '', '{}', ?, ?)
+                    conversation_id, user_id, readiness_stage, tone, summary, context_tags_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, '', '{}', ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     user_id=excluded.user_id,
                     readiness_stage=excluded.readiness_stage,
+                    tone=excluded.tone,
                     updated_at=excluded.updated_at
                 """,
-                (conversation_id, user_id, readiness_stage, now, now),
+                (conversation_id, user_id, readiness_stage, tone, now, now),
             )
             conn.commit()
         return {
             "conversation_id": conversation_id,
             "user_id": user_id,
             "readiness_stage": readiness_stage,
+            "tone": tone,
             "created_at": now,
         }
 
@@ -90,6 +110,8 @@ class SQLiteStore:
             if not row:
                 return None
             data = dict(row)
+            if "tone" not in data or data["tone"] is None:
+                data["tone"] = "standard"
             try:
                 data["context_tags"] = json.loads(data.get("context_tags_json", "{}"))
             except Exception:
@@ -117,6 +139,19 @@ class SQLiteStore:
             )
             conn.commit()
 
+    def update_tone(self, conversation_id: str, tone: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                UPDATE conversations
+                SET tone = ?, updated_at = ?
+                WHERE conversation_id = ?
+                """,
+                (tone, now, conversation_id),
+            )
+            conn.commit()
+
     def update_summary_and_tags(
         self,
         conversation_id: str,
@@ -135,6 +170,47 @@ class SQLiteStore:
                 (summary, tags_json, now, conversation_id),
             )
             conn.commit()
+
+    def record_readiness_event(
+        self,
+        conversation_id: str,
+        from_stage: str,
+        to_stage: str,
+        evidence: str = "",
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO readiness_events (
+                    conversation_id, from_stage, to_stage, evidence, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (conversation_id, from_stage, to_stage, evidence, now),
+            )
+            event_id = cursor.lastrowid
+            conn.commit()
+        return {
+            "id": event_id,
+            "conversation_id": conversation_id,
+            "from_stage": from_stage,
+            "to_stage": to_stage,
+            "evidence": evidence,
+            "created_at": now,
+        }
+
+    def get_readiness_events(self, conversation_id: str) -> list[dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, conversation_id, from_stage, to_stage, evidence, created_at
+                FROM readiness_events
+                WHERE conversation_id = ?
+                ORDER BY id ASC
+                """,
+                (conversation_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def add_message(
         self,
@@ -182,6 +258,7 @@ class SQLiteStore:
     def clear_all(self) -> None:
         """Utility for test suites."""
         with self._get_connection() as conn:
+            conn.execute("DELETE FROM readiness_events")
             conn.execute("DELETE FROM messages")
             conn.execute("DELETE FROM conversations")
             conn.commit()
