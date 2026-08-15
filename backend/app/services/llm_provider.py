@@ -128,45 +128,50 @@ class LLMProvider:
                 last_msg = m.get("content", "").lower()
                 break
 
-        # Check for json/structured extraction prompt
-        if "json" in system_prompt.lower() or "readiness" in system_prompt.lower():
+        sp_lower = system_prompt.lower()
+
+        # 1. Structured JSON Readiness extraction
+        if "ekstraksi klinis" in sp_lower or "proposed_stage" in sp_lower or "keluarkan hanya format json" in sp_lower:
             if "2 hari" in last_msg or "berhenti" in last_msg or "nggak ngerokok" in last_msg or "tidak merokok" in last_msg:
                 return '{"proposed_stage": "action", "evidence": "Pengguna melaporkan sudah mulai berhenti merokok."}'
             if "kambuh" in last_msg or "ngerokok lagi" in last_msg or "batal" in last_msg:
                 return '{"proposed_stage": "relapse", "evidence": "Pengguna melaporkan merokok kembali."}'
             return '{"proposed_stage": "contemplation", "evidence": "Pengguna masih berdiskusi seputar keinginan berhenti."}'
 
-        # Check for summary extraction prompt
-        if "summary" in system_prompt.lower() or "ringkas" in system_prompt.lower():
-            return f"Pengguna mendiskusikan situasi terkait: {last_msg[:80]}"
-
-        # Refusal script fallback
-        if "refusal" in system_prompt.lower() or "penolakan" in system_prompt.lower():
+        # 2. Refusal script
+        if "refusal script" in sp_lower or "tugas utama (refusal" in sp_lower:
             return (
-                "1. 'Gak dulu bro, tenggorokan lagi gak enak nih, es teh aja.'\n"
+                "1. 'Gak dulu bro, paru-paru gue lagi minta rehat nih, es teh aja.'\n"
                 "2. 'Santai, gue lagi rehat ngerokok dulu hari ini.'\n"
                 "3. 'Thanks tawarannya, tapi lagi fokus ngurangin nikotin nih.'"
             )
 
-        # Craving fallback
-        if "craving" in system_prompt.lower() or "urge" in system_prompt.lower() or "rokok" in last_msg or "vape" in last_msg:
+        # 3. Zone 1: Craving & Urge Surfing
+        if "fokus zone 1 (craving" in sp_lower:
             return (
-                "Gue paham banget, rasa craving ini bisa datang kuat tapi sifatnya seperti ombak yang akan surut. "
+                "Gue paham banget, rasa craving ini bisa terasa sangat kuat tapi sifatnya seperti ombak yang akan surut dalam beberapa menit. "
                 "Yuk coba teknik napas 4-7-8 dulu selama 1-2 menit untuk melewati puncak dorongannya."
             )
 
-        # Contemplation fallback
-        if "contemplation" in system_prompt.lower() or "menimbang" in system_prompt.lower():
+        # 4. Zone 1: Contemplation & Motivational Interviewing
+        if "fokus zone 1 (motivational" in sp_lower:
             return (
                 "Wajar banget kalau kamu merasa ragu atau menimbang-nimbang antara kenyamanan merokok dengan keinginan hidup lebih sehat. "
-                "Menurutmu, apa manfaat terbesar yang paling ingin kamu capai jika berhasil berhenti?"
+                "Menurutmu, apa hal paling berat saat memikirkan untuk berhenti?"
             )
 
-        # Emotional fallback
-        if "emosi" in system_prompt.lower() or "stres" in system_prompt.lower() or "stress" in last_msg or "capek" in last_msg:
+        # 5. Zone 2: Emotional Venting & Pivot
+        if "fokus zone 2" in sp_lower:
             return (
-                "Aku paham, situasi yang bikin stres atau lelah memang sering kali memicu dorongan ingin merokok sebagai pelarian. "
-                "Boleh cerita lebih lanjut apa yang sedang membuatmu merasa terbebani saat ini?"
+                "Pasti berat banget rasanya menghadapi situasi yang bikin stres begini. Wajar kalau pikiran langsung mencari pelarian ke rokok/vape. "
+                "Apakah saat ini kamu lagi merasakan dorongan kuat untuk merokok?"
+            )
+
+        # 6. Zone 3: Out-of-scope Redirect
+        if "fokus zone 3" in sp_lower:
+            return (
+                "Sebagai AI Companion di Renti, aku didesain khusus mendampingi perjalanan berhenti merokok dan vaping. "
+                "Ada yang bisa kubantu seputar pemicu atau rencanamu berhenti merokok hari ini?"
             )
 
         # Default companion response
