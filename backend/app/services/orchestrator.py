@@ -1,14 +1,23 @@
 """Orchestrator - Central coordination of the Renti AI Companion pipeline.
 
-Alur eksekusi (docs/STRUCTURE.md & ADR 09, 10):
-raw input -> canonicalize -> safety triage (policy engine) -> memory update ->
-routing (zone & intent) -> response generation -> output guardrail -> persistent storage.
+Alur eksekusi lengkap Hari 2 (docs/STRUCTURE.md & ADR 02, 04, 06, 09, 10, 11, 12, 13):
+1. Canonicalize input
+2. Safety policy triage (fast-path crisis / injection check)
+3. Zone and intent routing
+4. Deterministic tone detection & storage
+5. Hybrid readiness transition evaluation (Zone 1 ALLOW turns)
+6. System prompt composition with tone, readiness, and rolling summary
+7. Context assembly (summary + last 6 raw messages)
+8. LLM Provider generation (Gemini -> Groq -> template fallback)
+9. Output Guardrail (KEEP / SANITIZE / REPLACE)
+10. Rolling summary update & persistent storage
 """
 from typing import Optional
 
 from app.core.canonicalize import canonicalize_text
 from app.core.policy import SafetyPolicyEngine
 from app.core.settings import get_settings
+from app.prompts.companion import build_system_prompt, detect_tone
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -16,6 +25,9 @@ from app.schemas.chat import (
     ProviderInfo,
     ReadinessStage,
 )
+from app.services.llm_provider import LLMProvider
+from app.services.output_guardrail import OutputGuardrail
+from app.services.readiness import ReadinessService
 from app.services.routing import ZoneRouter
 from app.storage.sqlite_store import SQLiteStore
 
@@ -26,22 +38,35 @@ class Orchestrator:
         store: Optional[SQLiteStore] = None,
         policy_engine: Optional[SafetyPolicyEngine] = None,
         router: Optional[ZoneRouter] = None,
+        provider: Optional[LLMProvider] = None,
+        guardrail: Optional[OutputGuardrail] = None,
+        readiness_service: Optional[ReadinessService] = None,
     ):
         settings = get_settings()
         self.store = store or SQLiteStore(db_path=settings.db_path)
         self.policy_engine = policy_engine or SafetyPolicyEngine(crisis_hotline=settings.crisis_hotline)
         self.router = router or ZoneRouter()
+        self.provider = provider or LLMProvider(
+            gemini_api_key=settings.gemini_api_key,
+            groq_api_key=settings.groq_api_key,
+            gemini_model=settings.llm_primary_provider,
+            groq_model=settings.llm_fallback_provider,
+        )
+        self.guardrail = guardrail or OutputGuardrail()
+        self.readiness_service = readiness_service or ReadinessService()
 
     def create_conversation(
         self,
         conversation_id: str,
         user_id: str,
         readiness: ReadinessStage = "contemplation",
+        tone: str = "standard",
     ) -> None:
         self.store.create_conversation(
             conversation_id=conversation_id,
             user_id=user_id,
             readiness_stage=readiness,
+            tone=tone,
         )
 
     def conversation_exists(self, conversation_id: str) -> bool:
@@ -53,13 +78,14 @@ class Orchestrator:
             raise ValueError(f"Conversation {req.conversation_id} not found")
 
         current_readiness: ReadinessStage = conv["readiness_stage"]
+        current_tone: str = conv.get("tone", "standard")
         raw_msg = req.message
         canonical_msg = canonicalize_text(raw_msg)
 
         # 1. Safety Policy Evaluation (Fast-path & Crisis Check - ADR 09, 12)
         policy_result = self.policy_engine.evaluate(raw_msg, canonical_msg)
 
-        # 2. If acute crisis / self-harm / medical emergency detected
+        # 2. Fast-path: Acute crisis / self-harm / medical emergency
         if policy_result.action == "BLOCK_AND_SIGNPOST":
             reply_text = policy_result.signpost_message or "Silakan hubungi layanan darurat 119."
             self.store.add_message(
@@ -89,7 +115,7 @@ class Orchestrator:
                 provider=ProviderInfo(name="policy_fallback", fallback_used=True),
             )
 
-        # 3. If direct prompt injection or system boundary violation
+        # 3. Direct Prompt Injection / System Violation
         if policy_result.action == "SAFE_REDIRECT" and policy_result.signpost_message:
             reply_text = policy_result.signpost_message
             self.store.add_message(
@@ -116,7 +142,7 @@ class Orchestrator:
                 readiness_stage=current_readiness,
                 policy_action="SAFE_REDIRECT",
                 memory=MemoryInfo(updated=True, context_tags={}),
-                provider=ProviderInfo(name="mock", fallback_used=False),
+                provider=ProviderInfo(name="template", fallback_used=True),
             )
 
         # 4. Contextual Zone Routing (ADR 10)
@@ -125,46 +151,68 @@ class Orchestrator:
             readiness_stage=current_readiness,
             location_chip=req.client_context.location_chip,
         )
+        policy_act = "SAFE_REDIRECT" if decision.route == "zone_3_out_of_scope" else "ALLOW"
 
-        # 5. Day 1 Baseline Generation (Mock templates for zone routes)
-        # Note: Day 2 replaces this with LiteLLM provider adapter + companion prompt
-        if decision.route == "refusal_script":
-            reply_text = (
-                "Coba bilang: 'Gak dulu bro, paru-paru gua lagi minta rehat nih, es teh aja gua mah.' "
-                "Mau kubuatkan 3 opsi penolakan lain?"
-            )
-            policy_act = "ALLOW"
-        elif decision.route == "zone_1_contemplation":
-            reply_text = (
-                "Aku paham kamu masih menimbang-nimbang antara kenyamanan merokok dan keinginan untuk hidup lebih sehat. "
-                "Menurutmu, apa hal paling berat saat memikirkan berhenti?"
-            )
-            policy_act = "ALLOW"
-        elif decision.route == "zone_1_craving":
-            reply_text = (
-                "Gue paham, craving bisa terasa kuat. Yuk lewati beberapa menit pertama "
-                "dulu dengan napas pelan 4-7-8 dan urge surfing."
-            )
-            policy_act = "ALLOW"
-        elif decision.route == "zone_2_emotional":
-            reply_text = (
-                "Pasti berat banget rasanya menghadapi situasi yang bikin stres begini. "
-                "Wajar kalau pikiran langsung mencari pelarian ke rokok/vape. "
-                "Apakah saat ini kamu lagi merasakan dorongan kuat untuk merokok?"
-            )
-            policy_act = "ALLOW"
-        else:  # zone_3_out_of_scope
-            reply_text = (
-                "Sebagai AI Companion Renti, aku didesain khusus mendampingi "
-                "perjalanan berhenti merokok dan vape. Ada yang bisa kubantu seputar itu?"
-            )
-            policy_act = "SAFE_REDIRECT"
+        # 5. Tone Mirroring Classifier (ADR 04)
+        detected_tone = detect_tone(raw_msg)
+        if detected_tone != "standard" or current_tone == "standard":
+            current_tone = detected_tone
+            self.store.update_tone(req.conversation_id, current_tone)
 
-        # 6. Persistent Memory Update (SQLite)
+        # 6. Hybrid Readiness Transition (ADR 06, 13)
+        if policy_act == "ALLOW" and decision.route in ("zone_1_craving", "zone_1_contemplation"):
+            new_stage, evidence = self.readiness_service.evaluate_transition(
+                current_stage=current_readiness,
+                message=raw_msg,
+                route=decision.route,
+                provider=self.provider,
+            )
+            if evidence and new_stage != current_readiness:
+                self.store.update_readiness(req.conversation_id, new_stage)
+                self.store.record_readiness_event(
+                    conversation_id=req.conversation_id,
+                    from_stage=current_readiness,
+                    to_stage=new_stage,
+                    evidence=evidence,
+                )
+                current_readiness = new_stage
+
+        # 7. Context Assembly & Rolling Summary (ADR 02)
+        old_summary = conv.get("summary", "").strip()
+        past_msgs = self.store.get_messages(req.conversation_id, limit=6)
+
+        context_notes = f"Ringkasan riwayat percakapan: {old_summary}" if old_summary else ""
+        sys_prompt = build_system_prompt(
+            route=decision.route,
+            readiness_stage=current_readiness,
+            tone=current_tone,
+            context_notes=context_notes,
+        )
+
+        history_for_llm = [{"role": m["role"], "content": m["raw_content"]} for m in past_msgs]
+        history_for_llm.append({"role": "user", "content": raw_msg})
+
+        # 8. LLM Provider Generation with Zero-Crash Fallback (T1 #3)
+        gen_result = self.provider.generate(
+            system_prompt=sys_prompt,
+            messages=history_for_llm,
+        )
+
+        # 9. Output Guardrail (KEEP / SANITIZE / REPLACE) (T5 #6)
+        filtered_reply, _ = self.guardrail.filter_output(gen_result.text)
+
+        # 10. Update Rolling Summary & Persistent Storage
+        if not old_summary:
+            new_summary = f"Pengguna ({current_readiness}, {current_tone}): {raw_msg[:120]}"
+        else:
+            new_summary = f"{old_summary} | User: {raw_msg[:60]} -> Asisten ({decision.route})"
+            if len(new_summary) > 300:
+                new_summary = new_summary[-300:]
+
         merged_tags = {**conv.get("context_tags", {}), **decision.suggested_tags}
         self.store.update_summary_and_tags(
             conversation_id=req.conversation_id,
-            summary=conv.get("summary", ""),
+            summary=new_summary,
             context_tags=merged_tags,
         )
 
@@ -179,19 +227,22 @@ class Orchestrator:
         self.store.add_message(
             conversation_id=req.conversation_id,
             role="assistant",
-            raw_content=reply_text,
-            canonical_content=reply_text,
+            raw_content=filtered_reply,
+            canonical_content=filtered_reply,
             route=decision.route,
             policy_action=policy_act,
         )
 
         return ChatResponse(
             conversation_id=req.conversation_id,
-            reply=reply_text,
+            reply=filtered_reply,
             route=decision.route,
             intent=decision.intent,
             readiness_stage=current_readiness,
             policy_action=policy_act,
             memory=MemoryInfo(updated=True, context_tags=decision.suggested_tags),
-            provider=ProviderInfo(name="mock", fallback_used=False),
+            provider=ProviderInfo(
+                name=gen_result.provider_name,
+                fallback_used=gen_result.fallback_used,
+            ),
         )
