@@ -106,3 +106,37 @@ PANDUAN TONE: {tone.upper()}
 
 {f"Konteks riwayat/memori: {context_notes}" if context_notes else ""}
 """
+
+
+def generate_fallback_reply(route: str = "zone_1_craving", last_user_msg: str = "") -> str:
+    """Deterministic fallback responses for domain routes when LLM is offline or fails."""
+    if route == "refusal_script":
+        return (
+            "1. 'Gak dulu bro, paru-paru gue lagi minta rehat nih, es teh aja.'\n"
+            "2. 'Santai, gue lagi rehat ngerokok dulu hari ini.'\n"
+            "3. 'Thanks tawarannya, tapi lagi fokus ngurangin nikotin nih.'"
+        )
+    if route == "zone_1_craving":
+        return (
+            "Gue paham banget, rasa craving ini bisa terasa sangat kuat tapi sifatnya seperti ombak yang akan surut dalam beberapa menit. "
+            "Yuk coba teknik napas 4-7-8 dulu selama 1-2 menit untuk melewati puncak dorongannya."
+        )
+    if route == "zone_1_contemplation":
+        return (
+            "Wajar banget kalau kamu merasa ragu atau menimbang-nimbang antara kenyamanan merokok dengan keinginan hidup lebih sehat. "
+            "Menurutmu, apa hal paling berat saat memikirkan untuk berhenti?"
+        )
+    if route == "zone_2_emotional":
+        return (
+            "Pasti berat banget rasanya menghadapi situasi yang bikin stres begini. Wajar kalau pikiran langsung mencari pelarian ke rokok/vape. "
+            "Apakah saat ini kamu lagi merasakan dorongan kuat untuk merokok?"
+        )
+    if route == "zone_3_out_of_scope":
+        return (
+            "Sebagai AI Companion di Renti, aku didesain khusus mendampingi perjalanan berhenti merokok dan vaping. "
+            "Ada yang bisa kubantu seputar pemicu atau rencanamu berhenti merokok hari ini?"
+        )
+    return (
+        "Sebagai teman pendamping di Renti, aku siap mendengarkan dan membantumu melewati proses ini langkah demi langkah. "
+        "Apa yang sedang kamu rasakan saat ini?"
+    )

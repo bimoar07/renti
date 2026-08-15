@@ -8,14 +8,17 @@ Implements single entry point generate() for all Day 2 LLM consumers:
 Never-raise guarantee: any exception / quota error / timeout / empty response
 automatically drops one level down without bubbling up to HTTP 500.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import logging
-from typing import Any, Optional
+import re
+from typing import Any, Callable, Optional
 
 try:
     from litellm import completion
 except ImportError:
     completion = None  # type: ignore
+
+from app.prompts.companion import generate_fallback_reply
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +38,14 @@ class LLMProvider:
         gemini_model: str = "gemini/gemini-2.0-flash",
         groq_model: str = "groq/llama-3.3-70b-versatile",
         timeout: float = 10.0,
+        fallback_handler: Optional[Callable[[str, list[dict[str, str]]], str]] = None,
     ):
         self.gemini_api_key = (gemini_api_key or "").strip()
         self.groq_api_key = (groq_api_key or "").strip()
         self.gemini_model = gemini_model
         self.groq_model = groq_model
         self.timeout = timeout
+        self.fallback_handler = fallback_handler
 
     def generate(
         self,
@@ -93,8 +98,12 @@ class LLMProvider:
             except Exception as exc:
                 logger.warning("Groq call failed (%s), falling back to template", exc)
 
-        # 3. Deterministic Template Fallback (Offline / No Key / All Providers Failed)
-        fallback_text = self._generate_template_fallback(system_prompt, messages)
+        # 3. Deterministic Fallback (Offline / No Key / All Providers Failed)
+        if self.fallback_handler:
+            fallback_text = self.fallback_handler(system_prompt, messages)
+        else:
+            fallback_text = self._default_fallback(system_prompt, messages)
+
         return ProviderResult(
             text=fallback_text,
             provider_name="template",
@@ -117,7 +126,7 @@ class LLMProvider:
             logger.warning("Failed to extract content from completion response: %s", exc)
         return ""
 
-    def _generate_template_fallback(
+    def _default_fallback(
         self,
         system_prompt: str,
         messages: list[dict[str, str]],
@@ -130,55 +139,33 @@ class LLMProvider:
 
         sp_lower = system_prompt.lower()
 
-        # 1. Structured JSON Readiness extraction
+        # Structured JSON Readiness extraction
         if "ekstraksi klinis" in sp_lower or "proposed_stage" in sp_lower or "keluarkan hanya format json" in sp_lower:
-            if "2 hari" in last_msg or "berhenti" in last_msg or "nggak ngerokok" in last_msg or "tidak merokok" in last_msg:
+            current_match = re.search(r"tahap saat ini:\s*(\w+)", sp_lower)
+            cur = current_match.group(1) if current_match else "contemplation"
+
+            if "2 hari" in last_msg or "sudah berhenti" in last_msg or "nggak ngerokok sama sekali" in last_msg or "tidak merokok sama sekali" in last_msg:
                 return '{"proposed_stage": "action", "evidence": "Pengguna melaporkan sudah mulai berhenti merokok."}'
-            if "kambuh" in last_msg or "ngerokok lagi" in last_msg or "batal" in last_msg:
+            if "kambuh" in last_msg or "kemarin ngerokok" in last_msg or "udah ngerokok lagi" in last_msg or "sudah ngerokok lagi" in last_msg or "khilaf" in last_msg:
                 return '{"proposed_stage": "relapse", "evidence": "Pengguna melaporkan merokok kembali."}'
-            return '{"proposed_stage": "contemplation", "evidence": "Pengguna masih berdiskusi seputar keinginan berhenti."}'
+            if ("mikirin berhenti" in last_msg or "mau coba" in last_msg or "kepikiran" in last_msg) and cur == "precontemplation":
+                return '{"proposed_stage": "contemplation", "evidence": "Pengguna mulai menimbang untuk berhenti."}'
 
-        # 2. Refusal script
+            return f'{{"proposed_stage": "{cur}", "evidence": "Tahap kesiapan pengguna dipertahankan."}}'
+
+        # Detect zone from prompt
         if "refusal script" in sp_lower or "tugas utama (refusal" in sp_lower:
-            return (
-                "1. 'Gak dulu bro, paru-paru gue lagi minta rehat nih, es teh aja.'\n"
-                "2. 'Santai, gue lagi rehat ngerokok dulu hari ini.'\n"
-                "3. 'Thanks tawarannya, tapi lagi fokus ngurangin nikotin nih.'"
-            )
-
-        # 3. Zone 1: Craving & Urge Surfing
+            return generate_fallback_reply("refusal_script", last_msg)
         if "fokus zone 1 (craving" in sp_lower:
-            return (
-                "Gue paham banget, rasa craving ini bisa terasa sangat kuat tapi sifatnya seperti ombak yang akan surut dalam beberapa menit. "
-                "Yuk coba teknik napas 4-7-8 dulu selama 1-2 menit untuk melewati puncak dorongannya."
-            )
-
-        # 4. Zone 1: Contemplation & Motivational Interviewing
+            return generate_fallback_reply("zone_1_craving", last_msg)
         if "fokus zone 1 (motivational" in sp_lower:
-            return (
-                "Wajar banget kalau kamu merasa ragu atau menimbang-nimbang antara kenyamanan merokok dengan keinginan hidup lebih sehat. "
-                "Menurutmu, apa hal paling berat saat memikirkan untuk berhenti?"
-            )
-
-        # 5. Zone 2: Emotional Venting & Pivot
+            return generate_fallback_reply("zone_1_contemplation", last_msg)
         if "fokus zone 2" in sp_lower:
-            return (
-                "Pasti berat banget rasanya menghadapi situasi yang bikin stres begini. Wajar kalau pikiran langsung mencari pelarian ke rokok/vape. "
-                "Apakah saat ini kamu lagi merasakan dorongan kuat untuk merokok?"
-            )
-
-        # 6. Zone 3: Out-of-scope Redirect
+            return generate_fallback_reply("zone_2_emotional", last_msg)
         if "fokus zone 3" in sp_lower:
-            return (
-                "Sebagai AI Companion di Renti, aku didesain khusus mendampingi perjalanan berhenti merokok dan vaping. "
-                "Ada yang bisa kubantu seputar pemicu atau rencanamu berhenti merokok hari ini?"
-            )
+            return generate_fallback_reply("zone_3_out_of_scope", last_msg)
 
-        # Default companion response
-        return (
-            "Sebagai teman pendamping di Renti, aku siap mendengarkan dan membantumu melewati proses ini langkah demi langkah. "
-            "Apa yang sedang kamu rasakan saat ini?"
-        )
+        return generate_fallback_reply("default", last_msg)
 
 
 class RecordingProvider(LLMProvider):

@@ -1,4 +1,4 @@
-"""Tests for 7 Vertical Integration Demo Scenarios (T6 #8)."""
+"""Tests for 7 Vertical Integration Demo Scenarios and Pipeline Ordering (T6 #8)."""
 import os
 import tempfile
 import unittest
@@ -115,6 +115,7 @@ class TestDemoScenarios(unittest.TestCase):
         self.assertEqual(res.intent, "crisis_support")
         self.assertEqual(res.policy_action, "BLOCK_AND_SIGNPOST")
         self.assertIn("119", res.reply)
+        self.assertIn("0800-177-6565", res.reply)
         # Fast-path guarantee: zero LLM provider calls made
         self.assertEqual(len(self.provider.history), initial_call_count)
         self.assertEqual(res.provider.name, "policy_fallback")
@@ -157,6 +158,31 @@ class TestDemoScenarios(unittest.TestCase):
         # Context window includes previous raw messages (<=6)
         user_msgs = [m["content"] for m in messages if m.get("role") == "user"]
         self.assertTrue(any("warkop" in msg for msg in user_msgs) or "warkop" in system_prompt)
+
+    def test_pipeline_ordering_readiness_before_routing(self):
+        """Verifies that readiness transition from contemplation -> action immediately updates routing."""
+        conv_id = "conv-transition"
+        self._create_conv(conv_id, stage="contemplation", tone="casual")
+
+        # User in contemplation says they have started quitting ("2 hari gak ngerokok")
+        req = ChatRequest(
+            user_id="demo-user",
+            conversation_id=conv_id,
+            message="Gue udah 2 hari ini nggak ngerokok sama sekali bro.",
+        )
+        res = self.orchestrator.process(req)
+
+        # Stage must be updated to action
+        self.assertEqual(res.readiness_stage, "action")
+        # Route must immediately be zone_1_craving (action cessation support) instead of contemplation!
+        self.assertEqual(res.route, "zone_1_craving")
+        self.assertEqual(res.intent, "cessation_support")
+
+        # Verify readiness event recorded in store
+        events = self.store.get_readiness_events(conv_id)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["from_stage"], "contemplation")
+        self.assertEqual(events[0]["to_stage"], "action")
 
 
 if __name__ == "__main__":

@@ -1,16 +1,17 @@
 """Orchestrator - Central coordination of the Renti AI Companion pipeline.
 
-Alur eksekusi lengkap Hari 2 (docs/STRUCTURE.md & ADR 02, 04, 06, 09, 10, 11, 12, 13):
+Alur eksekusi lengkap (docs/STRUCTURE.md & ADR 02, 04, 06, 09, 10, 11, 12, 13):
 1. Canonicalize input
 2. Safety policy triage (fast-path crisis / injection check)
-3. Zone and intent routing
-4. Deterministic tone detection & storage
-5. Hybrid readiness transition evaluation (Zone 1 ALLOW turns)
-6. System prompt composition with tone, readiness, and rolling summary
-7. Context assembly (summary + last 6 raw messages)
-8. LLM Provider generation (Gemini -> Groq -> template fallback)
-9. Output Guardrail (KEEP / SANITIZE / REPLACE)
-10. Rolling summary update & persistent storage
+3. Load memory (rolling summary & recent message history)
+4. Hybrid readiness transition evaluation (Zone 1 candidate turns) -> update stage if valid
+5. Contextual Zone & intent routing (evaluated with latest readiness stage)
+6. Deterministic tone detection & storage
+7. System prompt composition with tone, readiness, and rolling summary
+8. Context assembly (summary + up to 6 raw messages) via MemoryService
+9. LLM Provider generation (Gemini -> Groq -> template fallback)
+10. Output Guardrail (KEEP / SANITIZE / REPLACE)
+11. Rolling summary update & persistent storage via MemoryService
 """
 from typing import Optional
 
@@ -26,6 +27,7 @@ from app.schemas.chat import (
     ReadinessStage,
 )
 from app.services.llm_provider import LLMProvider
+from app.services.memory import MemoryService
 from app.services.output_guardrail import OutputGuardrail
 from app.services.readiness import ReadinessService
 from app.services.routing import ZoneRouter
@@ -41,6 +43,7 @@ class Orchestrator:
         provider: Optional[LLMProvider] = None,
         guardrail: Optional[OutputGuardrail] = None,
         readiness_service: Optional[ReadinessService] = None,
+        memory_service: Optional[MemoryService] = None,
     ):
         settings = get_settings()
         self.store = store or SQLiteStore(db_path=settings.db_path)
@@ -54,6 +57,7 @@ class Orchestrator:
         )
         self.guardrail = guardrail or OutputGuardrail()
         self.readiness_service = readiness_service or ReadinessService()
+        self.memory_service = memory_service or MemoryService()
 
     def create_conversation(
         self,
@@ -145,26 +149,22 @@ class Orchestrator:
                 provider=ProviderInfo(name="template", fallback_used=True),
             )
 
-        # 4. Contextual Zone Routing (ADR 10)
-        decision = self.router.route_message(
+        # 4. Load Memory & History
+        old_summary = conv.get("summary", "").strip()
+        past_msgs = self.store.get_messages(req.conversation_id, limit=6)
+
+        # 5. Candidate Routing & Hybrid Readiness Evaluation (ADR 06, 13)
+        candidate_decision = self.router.route_message(
             canonical_text=canonical_msg,
             readiness_stage=current_readiness,
             location_chip=req.client_context.location_chip,
         )
-        policy_act = "SAFE_REDIRECT" if decision.route == "zone_3_out_of_scope" else "ALLOW"
 
-        # 5. Tone Mirroring Classifier (ADR 04)
-        detected_tone = detect_tone(raw_msg)
-        if detected_tone != "standard" or current_tone == "standard":
-            current_tone = detected_tone
-            self.store.update_tone(req.conversation_id, current_tone)
-
-        # 6. Hybrid Readiness Transition (ADR 06, 13)
-        if policy_act == "ALLOW" and decision.route in ("zone_1_craving", "zone_1_contemplation"):
+        if candidate_decision.route in ("zone_1_craving", "zone_1_contemplation"):
             new_stage, evidence = self.readiness_service.evaluate_transition(
                 current_stage=current_readiness,
                 message=raw_msg,
-                route=decision.route,
+                route=candidate_decision.route,
                 provider=self.provider,
             )
             if evidence and new_stage != current_readiness:
@@ -177,11 +177,27 @@ class Orchestrator:
                 )
                 current_readiness = new_stage
 
-        # 7. Context Assembly & Rolling Summary (ADR 02)
-        old_summary = conv.get("summary", "").strip()
-        past_msgs = self.store.get_messages(req.conversation_id, limit=6)
+        # 6. Final Zone Routing with Updated Readiness Stage
+        decision = self.router.route_message(
+            canonical_text=canonical_msg,
+            readiness_stage=current_readiness,
+            location_chip=req.client_context.location_chip,
+        )
+        policy_act = "SAFE_REDIRECT" if decision.route == "zone_3_out_of_scope" else "ALLOW"
 
-        context_notes = f"Ringkasan riwayat percakapan: {old_summary}" if old_summary else ""
+        # 7. Tone Mirroring Classifier (ADR 04)
+        detected_tone = detect_tone(raw_msg)
+        if detected_tone != "standard" or current_tone == "standard":
+            current_tone = detected_tone
+            self.store.update_tone(req.conversation_id, current_tone)
+
+        # 8. Assemble Prompt & Context Window via MemoryService (ADR 02)
+        context_notes, history_for_llm = self.memory_service.build_context_window(
+            old_summary=old_summary,
+            past_messages=past_msgs,
+            current_msg=raw_msg,
+            limit=6,
+        )
         sys_prompt = build_system_prompt(
             route=decision.route,
             readiness_stage=current_readiness,
@@ -189,27 +205,27 @@ class Orchestrator:
             context_notes=context_notes,
         )
 
-        history_for_llm = [{"role": m["role"], "content": m["raw_content"]} for m in past_msgs]
-        history_for_llm.append({"role": "user", "content": raw_msg})
-
-        # 8. LLM Provider Generation with Zero-Crash Fallback (T1 #3)
+        # 9. LLM Provider Generation with Zero-Crash Fallback (T1 #3)
         gen_result = self.provider.generate(
             system_prompt=sys_prompt,
             messages=history_for_llm,
         )
 
-        # 9. Output Guardrail (KEEP / SANITIZE / REPLACE) (T5 #6)
+        # 10. Output Guardrail (KEEP / SANITIZE / REPLACE) (T5 #6)
         filtered_reply, _ = self.guardrail.filter_output(gen_result.text)
 
-        # 10. Update Rolling Summary & Persistent Storage
-        if not old_summary:
-            new_summary = f"Pengguna ({current_readiness}, {current_tone}): {raw_msg[:120]}"
-        else:
-            new_summary = f"{old_summary} | User: {raw_msg[:60]} -> Asisten ({decision.route})"
-            if len(new_summary) > 300:
-                new_summary = new_summary[-300:]
-
-        merged_tags = {**conv.get("context_tags", {}), **decision.suggested_tags}
+        # 11. Update Rolling Summary & Persistent Storage via MemoryService
+        new_summary = self.memory_service.update_rolling_summary(
+            old_summary=old_summary,
+            raw_msg=raw_msg,
+            current_readiness=current_readiness,
+            current_tone=current_tone,
+            route=decision.route,
+        )
+        merged_tags = self.memory_service.merge_tags(
+            existing_tags=conv.get("context_tags", {}),
+            new_tags=decision.suggested_tags,
+        )
         self.store.update_summary_and_tags(
             conversation_id=req.conversation_id,
             summary=new_summary,

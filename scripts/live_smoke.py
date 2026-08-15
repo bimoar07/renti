@@ -111,24 +111,31 @@ def run_smoke_test():
         print("  [Mode] Menjalankan via FastAPI TestClient (In-memory HTTP Pipeline)")
 
     client = httpx.Client(base_url=base_url) if use_live_http else TestClient(app)
-
-    # 1. Create conversation
     user_id = "demo-user-gemastik"
-    resp = client.post("/api/v1/conversations", json={"user_id": user_id, "readiness_stage": "action"})
-    if resp.status_code != 201:
-        print(f"❌ Gagal membuat percakapan: HTTP {resp.status_code} - {resp.text}")
-        sys.exit(1)
-
-    conv_data = resp.json()
-    conv_id = conv_data["conversation_id"]
-    print(f"  [Init] Percakapan Dibuat: {conv_id} | User: {user_id}\n")
-
     passed_count = 0
+
+    # For Scenario 7 memory demonstration, keep track of scenario 1's conversation
+    memory_conv_id = None
 
     for item in SCENARIOS:
         print("-" * 80)
         print(f"  Skenario #{item['id']}: {item['name']}")
         print(f"  👤 User: \"{item['message']}\"")
+
+        # Determine conversation to use
+        if item["id"] == 7 and memory_conv_id:
+            conv_id = memory_conv_id
+        else:
+            resp = client.post(
+                "/api/v1/conversations",
+                json={"user_id": user_id, "readiness_stage": item.get("readiness", "action")},
+            )
+            if resp.status_code != 201:
+                print(f"  ❌ Gagal membuat percakapan: HTTP {resp.status_code} - {resp.text}")
+                continue
+            conv_id = resp.json()["conversation_id"]
+            if item["id"] == 1:
+                memory_conv_id = conv_id
 
         payload = {
             "user_id": user_id,
