@@ -57,3 +57,5 @@ proposal/assets/videos/
 
 # Hermes local config
 .hermes/
+# Antigravity / local worktrees (never commit)
+.worktrees/

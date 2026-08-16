@@ -46,7 +46,7 @@
 ### Bimo (Backend & AI)
 - [x] Task 3.1A: Finalisasi backend hardening: timeout resilience, error mapping JSON terstruktur, metadata logging
 - [x] Task 3.2A: Jalankan seluruh test backend → 100% hijau (72/72)
-- [ ] Task 3.3A: Verifikasi 7 skenario dari klien sungguhan — ⚠️ smoke 6/7: skenario 7 ekspektasi perlu disesuaikan (route dipengaruhi stage yg berubah)
+- [x] Task 3.3A: Verifikasi 7 skenario dari klien sungguhan — ✅ 7/7 via HTTP live (`--base-url` LAN) setelah ekspektasi skenario 1 & 7 dibuat adaptif zone-1 (route mengikuti stage readiness yang berubah, konsisten ADR-06)
 
 ### Erico (Mobile & Desain)
 - [ ] Task 3.1B: **Rekam video demo ≤ 3 menit** di emulator / device asli

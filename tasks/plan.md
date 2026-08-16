@@ -16,4 +16,5 @@
 - [x] **T4 (#15):** Skrip server demo (`0.0.0.0`) + seed `demo-user-001` + percakapan siap.
 - [x] **T5 (#16):** `live_smoke.py --base-url` untuk verifikasi via alamat LAN.
 - [x] **T6 (#17):** Verifikasi gabungan — 72/72 test OK + kontrak OK. ⚠️ Smoke live 6/7 (skenario 7: ekspektasi route perlu disesuaikan dgn readiness yang berubah — lihat `tasks/todo.md`).
+- [x] **Verifikasi Task 3.3A (16 Agu, sesi lanjutan):** smoke 7/7 via HTTP live — skenario 1 & 7 dibuat ekspektasi adaptif zone-1 (`expected_routes`); akar masalah bukan bug: matriks MAPR mengizinkan action→contemplation sehingga route mengikuti stage.
 - [x] **Model Gemini:** `gemini-2.0-flash` sudah dihapus Google → default diganti `gemini/gemini-flash-latest` (tidak bisa mati lagi).
