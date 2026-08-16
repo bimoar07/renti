@@ -106,13 +106,43 @@ Jalur utama chatbot. Terima pesan pengguna + konteks; balas respon terstruktur l
 
 ## Kode Status & Error
 
-| Kode | Arti |
-|---|---|
-| `200` | Normal / fallback dengan policy_action |
-| `201` | Conversation dibuat |
-| `400` | Payload invalid (Pydantic) |
-| `422` | Validasi schema gagal |
-| `429` | Rate limit / provider quota (fallback dipicu di sisi backend) |
-| `500` | Error internal (Mobile harus menampilkan pesan aman, bukan raw) |
+| Kode | Arti | Format Envelope Body |
+|---|---|---|
+| `200` | Normal / fallback dengan `policy_action` (termasuk saat kuota AI habis) | `ChatResponse` JSON |
+| `201` | Conversation berhasil dibuat | `ConversationResponse` JSON |
+| `400` | Bad Request / Payload tidak valid | `{"detail": {"code": "bad_request", "message": "..."}}` |
+| `404` | Conversation atau resource tidak ditemukan | `{"detail": {"code": "not_found", "message": "..."}}` |
+| `422` | Validasi schema/tipe data gagal (FastAPI/Pydantic) | `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}` |
+| `500` | Error internal server tak terduga (pesan aman tersanitasi) | `{"detail": {"code": "internal_error", "message": "..."}}` |
 
-> Error terstruktur (JSON) agar mobile bisa membedakan loading / normal / redirect / block / error / fallback.
+> **Format Error Terstruktur:**
+> Semua error HTTP dari backend mengembalikan JSON dengan envelope `detail`. Pada error `400`, `404`, dan `500`, `detail` berisi objek terstruktur dengan `code` (string identifier konsisten) dan `message` (pesan aman yang ramah pengguna). Pada status `500`, server tidak pernah membocorkan stack trace internal atau pesan mentah ke client.
+
+### Contoh Respons Error
+
+**404 Not Found:**
+```json
+{
+  "detail": {
+    "code": "not_found",
+    "message": "conversation not found; create it first"
+  }
+}
+```
+
+**500 Internal Server Error:**
+```json
+{
+  "detail": {
+    "code": "internal_error",
+    "message": "Terjadi kesalahan internal pada server. Silakan coba lagi nanti."
+  }
+}
+```
+
+### Catatan Penting: Kuota Provider AI (Zero-Crash)
+
+> **Zero-Crash Never-Raise:**
+> Kehabisan kuota atau rate limit pada provider LLM upstream (Gemini / Groq) **TIDAK PERNAH menghasilkan status HTTP 429** ke client / aplikasi mobile.
+> Backend Renti mengimplementasikan mekanisme fallback berlapis deterministik (Gemini → Groq → Template deterministik). Jika seluruh provider AI gagal atau kehabisan kuota, endpoint tetap merespons dengan **HTTP 200** dengan `provider.fallback_used = true` dan `reply` template yang valid.
+> **Dampak ke Mobile:** Aplikasi mobile **tidak perlu** membuat UI error 429 khusus.

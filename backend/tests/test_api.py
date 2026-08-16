@@ -113,10 +113,53 @@ class ChatApiTest(unittest.TestCase):
             json={"user_id": "u1", "conversation_id": "nope", "message": "halo"},
         )
         self.assertEqual(r.status_code, 404)
+        body = r.json()
+        self.assertIn("detail", body)
+        self.assertIsInstance(body["detail"], dict)
+        self.assertEqual(body["detail"]["code"], "not_found")
+        self.assertIn("message", body["detail"])
 
     def test_invalid_payload_returns_422(self):
         r = self.client.post("/api/v1/chat", json={"user_id": ""})
         self.assertEqual(r.status_code, 422)
+        body = r.json()
+        self.assertIn("detail", body)
+
+    def test_bad_request_returns_structured_400(self):
+        from unittest.mock import patch
+        from fastapi import HTTPException
+
+        cid = self._make_conversation()
+        with patch("app.api.routes_chat._orchestrator.process", side_effect=HTTPException(status_code=400, detail="bad request payload")):
+            r = self.client.post(
+                "/api/v1/chat",
+                json={"user_id": "u1", "conversation_id": cid, "message": "halo"},
+            )
+            self.assertEqual(r.status_code, 400)
+            body = r.json()
+            self.assertIn("detail", body)
+            self.assertIsInstance(body["detail"], dict)
+            self.assertEqual(body["detail"]["code"], "bad_request")
+            self.assertEqual(body["detail"]["message"], "bad request payload")
+
+    def test_unhandled_exception_returns_structured_500(self):
+        from unittest.mock import patch
+
+        cid = self._make_conversation()
+        with patch("app.api.routes_chat._orchestrator.process", side_effect=RuntimeError("secret db connection failure")):
+            client = TestClient(app, raise_server_exceptions=False)
+            r = client.post(
+                "/api/v1/chat",
+                json={"user_id": "u1", "conversation_id": cid, "message": "halo"},
+            )
+            self.assertEqual(r.status_code, 500)
+            body = r.json()
+            self.assertIn("detail", body)
+            self.assertIsInstance(body["detail"], dict)
+            self.assertEqual(body["detail"]["code"], "internal_error")
+            self.assertIn("message", body["detail"])
+            # Pastikan pesan raw/sensitif tidak bocor ke client
+            self.assertNotIn("secret db connection failure", r.text)
 
 
 if __name__ == "__main__":
