@@ -46,6 +46,7 @@ CRISIS_SIGNPOST_MESSAGE = (
     "Aku ikut prihatin mendengarnya. Jika kamu sedang dalam kondisi darurat atau ingin menyakiti diri, "
     "tolong segera hubungi layanan resmi darurat Indonesia berikut:\n"
     "📞 Layanan Sehat Jiwa Kemenkes: 119 (Ekstensi 8)\n"
+    "🚭 Quitline Berhenti Merokok Kemenkes: 0800-177-6565\n"
     "🚑 Call Center Darurat / Medis: 119 / IGD Rumah Sakit Terdekat\n"
     "Kamu tidak sendirian, ada tenaga profesional yang siap mendampingimu."
 )
