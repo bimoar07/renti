@@ -1,15 +1,59 @@
+# =========================
+# Android & Gradle (Erico)
+# =========================
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+.gradle/
+/.gradle/
+build/
+/build/
+captures/
+/captures/
+.externalNativeBuild/
+.cxx/
 local.properties
+/local.properties
+mobile/android/.gradle/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/local.properties
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# =========================
+# Python & Backend (Bimo)
+# =========================
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+*.db
+*.sqlite3
+
+# Env secrets — JANGAN commit
+.env
+.env.local
+
+# =========================
+# OS / Editor / IDE
+# =========================
+.DS_Store
+*.swp
+.idea/
+/.idea/
+.vscode/
+
+# =========================
+# Deliverables & Lainnya
+# =========================
+*.zip
+*.rar
+*.mp4
+*.mov
+proposal/assets/videos/
+
+# Hermes local config
+.hermes/
