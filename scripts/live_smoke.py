@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Live Smoke & Demo Script for Renti AI Companion (T7 #9).
+"""Live Smoke & Demo Script for Renti AI Companion (T7 #9 / T5 #16).
 
 Menjalankan 7 skenario demo end-to-end melalui protokol HTTP API.
-Mendukung pengujian terhadap live server (http://localhost:8000) atau TestClient in-memory.
+Mendukung pengujian terhadap live server (http://localhost:8000 atau via --base-url)
+atau TestClient in-memory.
 
 Cara menjalankan:
     python3 scripts/live_smoke.py
+    python3 scripts/live_smoke.py --base-url http://192.168.1.50:8000
 """
+import argparse
 import sys
 import os
 from pathlib import Path
@@ -91,82 +94,101 @@ SCENARIOS = [
 ]
 
 
-def run_smoke_test():
+def run_smoke_test(target_base_url: str | None = None):
     print("=" * 80)
     print("  🚀 RENTI AI COMPANION — LIVE SMOKE & DEMO SUITE (7 SKENARIO)")
     print("=" * 80)
 
-    # Check if a live server is running on localhost:8000
-    base_url = "http://localhost:8000"
     use_live_http = False
-    try:
-        r = httpx.get(f"{base_url}/health", timeout=1.0)
-        if r.status_code == 200:
-            use_live_http = True
-            print("  [Mode] Menghubungkan ke Live Backend Server: http://localhost:8000")
-    except Exception:
-        pass
+    base_url = "http://localhost:8000"
 
-    if not use_live_http:
-        print("  [Mode] Menjalankan via FastAPI TestClient (In-memory HTTP Pipeline)")
+    if target_base_url:
+        base_url = target_base_url.rstrip("/")
+        try:
+            r = httpx.get(f"{base_url}/health", timeout=3.0)
+            if r.status_code == 200:
+                use_live_http = True
+                print(f"  [Mode] Menghubungkan ke Backend Server (Custom Base URL): {base_url}")
+            else:
+                print(f"  ❌ Gagal terhubung ke {base_url}/health: HTTP {r.status_code}")
+                sys.exit(1)
+        except Exception as e:
+            print(f"  ❌ Gagal terhubung ke backend server di {base_url}: {e}")
+            sys.exit(1)
+    else:
+        # Check if a live server is running on localhost:8000
+        try:
+            r = httpx.get(f"{base_url}/health", timeout=1.0)
+            if r.status_code == 200:
+                use_live_http = True
+                print("  [Mode] Menghubungkan ke Live Backend Server: http://localhost:8000")
+        except Exception:
+            pass
 
-    client = httpx.Client(base_url=base_url) if use_live_http else TestClient(app)
+        if not use_live_http:
+            print("  [Mode] Menjalankan via FastAPI TestClient (In-memory HTTP Pipeline)")
+
+    client = httpx.Client(base_url=base_url, timeout=30.0) if use_live_http else TestClient(app)
     user_id = "demo-user-gemastik"
     passed_count = 0
 
     # For Scenario 7 memory demonstration, keep track of scenario 1's conversation
     memory_conv_id = None
 
-    for item in SCENARIOS:
-        print("-" * 80)
-        print(f"  Skenario #{item['id']}: {item['name']}")
-        print(f"  👤 User: \"{item['message']}\"")
+    try:
+        for item in SCENARIOS:
+            print("-" * 80)
+            print(f"  Skenario #{item['id']}: {item['name']}")
+            print(f"  👤 User: \"{item['message']}\"")
 
-        # Determine conversation to use
-        if item["id"] == 7 and memory_conv_id:
-            conv_id = memory_conv_id
-        else:
-            resp = client.post(
-                "/api/v1/conversations",
-                json={"user_id": user_id, "readiness_stage": item.get("readiness", "action")},
-            )
-            if resp.status_code != 201:
-                print(f"  ❌ Gagal membuat percakapan: HTTP {resp.status_code} - {resp.text}")
+            # Determine conversation to use
+            if item["id"] == 7 and memory_conv_id:
+                conv_id = memory_conv_id
+            else:
+                resp = client.post(
+                    "/api/v1/conversations",
+                    json={"user_id": user_id, "readiness_stage": item.get("readiness", "action")},
+                )
+                if resp.status_code != 201:
+                    print(f"  ❌ Gagal membuat percakapan: HTTP {resp.status_code} - {resp.text}")
+                    continue
+                conv_id = resp.json()["conversation_id"]
+                if item["id"] == 1:
+                    memory_conv_id = conv_id
+
+            payload = {
+                "user_id": user_id,
+                "conversation_id": conv_id,
+                "message": item["message"],
+                "client_context": item.get("context", {}),
+            }
+
+            chat_resp = client.post("/api/v1/chat", json=payload)
+            if chat_resp.status_code != 200:
+                print(f"  ❌ GAGAL (HTTP {chat_resp.status_code}): {chat_resp.text}")
                 continue
-            conv_id = resp.json()["conversation_id"]
-            if item["id"] == 1:
-                memory_conv_id = conv_id
 
-        payload = {
-            "user_id": user_id,
-            "conversation_id": conv_id,
-            "message": item["message"],
-            "client_context": item.get("context", {}),
-        }
+            body = chat_resp.json()
+            route = body.get("route")
+            policy = body.get("policy_action")
+            provider = body.get("provider", {})
+            readiness = body.get("readiness_stage")
+            reply = body.get("reply", "")
 
-        chat_resp = client.post("/api/v1/chat", json=payload)
-        if chat_resp.status_code != 200:
-            print(f"  ❌ GAGAL (HTTP {chat_resp.status_code}): {chat_resp.text}")
-            continue
+            # Assertions
+            route_ok = route == item["expected_route"]
+            policy_ok = policy == item["expected_policy"]
 
-        body = chat_resp.json()
-        route = body.get("route")
-        policy = body.get("policy_action")
-        provider = body.get("provider", {})
-        readiness = body.get("readiness_stage")
-        reply = body.get("reply", "")
+            status_str = "✅ PASS" if (route_ok and policy_ok) else "❌ FAIL"
+            print(f"  🤖 Renti ({provider.get('name', 'unknown')} | Fallback: {provider.get('fallback_used')}):")
+            print(f"     \"{reply[:120]}...\"" if len(reply) > 120 else f"     \"{reply}\"")
+            print(f"  [Status] {status_str} | Route: {route} | Policy: {policy} | Stage: {readiness}")
 
-        # Assertions
-        route_ok = route == item["expected_route"]
-        policy_ok = policy == item["expected_policy"]
-
-        status_str = "✅ PASS" if (route_ok and policy_ok) else "❌ FAIL"
-        print(f"  🤖 Renti ({provider.get('name', 'unknown')} | Fallback: {provider.get('fallback_used')}):")
-        print(f"     \"{reply[:120]}...\"" if len(reply) > 120 else f"     \"{reply}\"")
-        print(f"  [Status] {status_str} | Route: {route} | Policy: {policy} | Stage: {readiness}")
-
-        if route_ok and policy_ok:
-            passed_count += 1
+            if route_ok and policy_ok:
+                passed_count += 1
+    finally:
+        if isinstance(client, httpx.Client):
+            client.close()
 
     print("\n" + "=" * 80)
     print(f"  HASIL SMOKE TEST: {passed_count}/{len(SCENARIOS)} Skenario Berhasil.")
@@ -180,5 +202,20 @@ def run_smoke_test():
         sys.exit(1)
 
 
+def main():
+    parser = argparse.ArgumentParser(
+        description="Live Smoke & Demo Suite for Renti AI Companion"
+    )
+    parser.add_argument(
+        "--base-url",
+        dest="base_url",
+        type=str,
+        default=None,
+        help="Target backend base URL (e.g. http://192.168.1.50:8000). If omitted, connects to http://localhost:8000 or falls back to in-memory TestClient.",
+    )
+    args = parser.parse_args()
+    run_smoke_test(target_base_url=args.base_url)
+
+
 if __name__ == "__main__":
-    run_smoke_test()
+    main()
