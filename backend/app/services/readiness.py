@@ -52,6 +52,7 @@ class ReadinessService:
         message: str,
         route: ZoneRoute,
         provider: LLMProvider,
+        deadline: Optional[float] = None,
     ) -> tuple[ReadinessStage, Optional[str]]:
         """Evaluate readiness stage transition for incoming message.
 
@@ -74,6 +75,7 @@ class ReadinessService:
         res = provider.generate(
             system_prompt=extractor_system_prompt,
             messages=[{"role": "user", "content": message}],
+            deadline=deadline,
         )
 
         proposed_stage, evidence = self._parse_proposal(res.text, current_stage)
