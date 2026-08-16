@@ -13,6 +13,9 @@ Alur eksekusi lengkap (docs/STRUCTURE.md & ADR 02, 04, 06, 09, 10, 11, 12, 13):
 10. Output Guardrail (KEEP / SANITIZE / REPLACE)
 11. Rolling summary update & persistent storage via MemoryService
 """
+import json
+import logging
+import time
 from typing import Optional
 
 from app.core.canonicalize import canonicalize_text
@@ -152,6 +155,7 @@ class Orchestrator:
             )
 
         # 4. Load Memory & History
+        request_deadline = time.monotonic() + getattr(self.provider, "total_deadline", 12.0)
         old_summary = conv.get("summary", "").strip()
         past_msgs = self.store.get_messages(req.conversation_id, limit=6)
 
@@ -168,6 +172,7 @@ class Orchestrator:
                 message=raw_msg,
                 route=candidate_decision.route,
                 provider=self.provider,
+                deadline=request_deadline,
             )
             if evidence and new_stage != current_readiness:
                 self.store.update_readiness(req.conversation_id, new_stage)
@@ -211,6 +216,7 @@ class Orchestrator:
         gen_result = self.provider.generate(
             system_prompt=sys_prompt,
             messages=history_for_llm,
+            deadline=request_deadline,
         )
 
         # 10. Output Guardrail (KEEP / SANITIZE / REPLACE) (T5 #6)

@@ -63,12 +63,14 @@ class LLMProvider:
         self,
         system_prompt: str,
         messages: list[dict[str, str]],
+        deadline: Optional[float] = None,
         **kwargs: Any,
     ) -> ProviderResult:
         """Call LLM with Zero-Crash fallback cascade: Gemini -> Groq -> template."""
         full_messages = [{"role": "system", "content": system_prompt}] + messages
         start_time = time.monotonic()
-        deadline = start_time + self.total_deadline
+        if deadline is None:
+            deadline = start_time + self.total_deadline
 
         # 1. Try Primary: Gemini
         remaining = deadline - time.monotonic()

@@ -160,120 +160,123 @@ class ChatApiTest(unittest.TestCase):
             # Pastikan pesan raw/sensitif tidak bocor ke client
             self.assertNotIn("secret db connection failure", r.text)
 
-def test_chat_metadata_logging_structured_json(caplog):
-    """Verifikasi bahwa setiap POST /api/v1/chat mencatat 1 baris log terstruktur JSON-lines ke stdout."""
-    import json
-    import logging
+    def test_chat_metadata_logging_structured_json(self):
+        """Verifikasi bahwa setiap POST /api/v1/chat mencatat 1 baris log terstruktur JSON-lines."""
+        import json
+        import logging
 
-    caplog.set_level(logging.INFO)
-    client = TestClient(app)
+        client = TestClient(app)
 
-    # 1. Buat percakapan
-    r_conv = client.post("/api/v1/conversations", json={"user_id": "u1", "readiness_stage": "action"})
-    assert r_conv.status_code == 201
-    cid = r_conv.json()["conversation_id"]
+        # 1. Buat percakapan
+        r_conv = client.post("/api/v1/conversations", json={"user_id": "u1", "readiness_stage": "action"})
+        self.assertEqual(r_conv.status_code, 201)
+        cid = r_conv.json()["conversation_id"]
 
-    # 2. Kirim pesan chat
-    r_chat = client.post(
-        "/api/v1/chat",
-        json={
-            "user_id": "u1",
-            "conversation_id": cid,
-            "message": "Gue lagi pengin ngerokok banget di warkop.",
-            "client_context": {"location_chip": "warkop", "offline": False},
-        },
-    )
-    assert r_chat.status_code == 200
+        # 2. Kirim pesan chat sambil menangkap log
+        with self.assertLogs("app.api.routes_chat", level="INFO") as cm:
+            r_chat = client.post(
+                "/api/v1/chat",
+                json={
+                    "user_id": "u1",
+                    "conversation_id": cid,
+                    "message": "Gue lagi pengin ngerokok banget di warkop.",
+                    "client_context": {"location_chip": "warkop", "offline": False},
+                },
+            )
+            self.assertEqual(r_chat.status_code, 200)
 
-    # 3. Cari baris log JSON-lines metadata untuk percakapan ini
-    metadata_logs = []
-    for record in caplog.records:
-        msg = record.getMessage().strip()
-        if msg.startswith("{") and msg.endswith("}"):
-            try:
-                data = json.loads(msg)
-                if data.get("conversation_id") == cid:
-                    metadata_logs.append(data)
-            except json.JSONDecodeError:
-                pass
+        # 3. Cari baris log JSON-lines metadata untuk percakapan ini
+        metadata_logs = []
+        for log_msg in cm.output:
+            # strip logging level/logger prefix if present
+            raw_text = log_msg.split(":", 2)[-1].strip() if ":" in log_msg else log_msg.strip()
+            if raw_text.startswith("{") and raw_text.endswith("}"):
+                try:
+                    data = json.loads(raw_text)
+                    if data.get("conversation_id") == cid:
+                        metadata_logs.append(data)
+                except json.JSONDecodeError:
+                    pass
 
-    assert len(metadata_logs) == 1, f"Harus ada tepat 1 baris log JSON-lines metadata, ditemukan: {len(metadata_logs)}"
-    meta = metadata_logs[0]
+        self.assertEqual(len(metadata_logs), 1, f"Harus ada tepat 1 baris log JSON-lines metadata, ditemukan: {len(metadata_logs)}")
+        meta = metadata_logs[0]
 
-    # 4. Verifikasi seluruh 7 field metadata yang disyaratkan
-    required_fields = [
-        "conversation_id",
-        "route",
-        "readiness_stage",
-        "policy_action",
-        "provider",
-        "latency_ms",
-        "fallback_used",
-    ]
-    for field in required_fields:
-        assert field in meta, f"Field '{field}' harus ada dalam baris log metadata"
+        # 4. Verifikasi seluruh 7 field metadata yang disyaratkan
+        required_fields = [
+            "conversation_id",
+            "route",
+            "readiness_stage",
+            "policy_action",
+            "provider",
+            "latency_ms",
+            "fallback_used",
+        ]
+        for field in required_fields:
+            self.assertIn(field, meta, f"Field '{field}' harus ada dalam baris log metadata")
 
-    assert meta["conversation_id"] == cid
-    assert meta["route"] == "zone_1_craving"
-    assert meta["readiness_stage"] == "action"
-    assert meta["policy_action"] == "ALLOW"
-    assert isinstance(meta["provider"], str) and len(meta["provider"]) > 0
-    assert isinstance(meta["latency_ms"], (int, float))
-    assert meta["latency_ms"] >= 0
-    assert isinstance(meta["fallback_used"], bool)
+        self.assertEqual(meta["conversation_id"], cid)
+        self.assertEqual(meta["route"], "zone_1_craving")
+        self.assertEqual(meta["readiness_stage"], "action")
+        self.assertEqual(meta["policy_action"], "ALLOW")
+        self.assertIsInstance(meta["provider"], str)
+        self.assertTrue(len(meta["provider"]) > 0)
+        self.assertIsInstance(meta["latency_ms"], (int, float))
+        self.assertGreaterEqual(meta["latency_ms"], 0)
+        self.assertIsInstance(meta["fallback_used"], bool)
 
-def test_chat_metadata_logging_privacy_strict(caplog):
-    """PRIVASI KETAT: Uji bahwa baris log TIDAK memuat isi raw pesan pengguna dan TIDAK memuat API key."""
-    import json
-    import logging
+    def test_chat_metadata_logging_privacy_strict(self):
+        """PRIVASI KETAT: Uji bahwa baris log TIDAK memuat isi raw pesan pengguna dan TIDAK memuat API key."""
+        import json
+        import logging
 
-    caplog.set_level(logging.INFO)
-    client = TestClient(app)
+        client = TestClient(app)
 
-    r_conv = client.post("/api/v1/conversations", json={"user_id": "u1", "readiness_stage": "contemplation"})
-    assert r_conv.status_code == 201
-    cid = r_conv.json()["conversation_id"]
+        r_conv = client.post("/api/v1/conversations", json={"user_id": "u1", "readiness_stage": "contemplation"})
+        self.assertEqual(r_conv.status_code, 201)
+        cid = r_conv.json()["conversation_id"]
 
-    sensitive_raw_message = "SENSITIVE_SECRET_RAW_MESSAGE_TOKEN_XYZ_98765"
-    sensitive_api_key = "AIzaSyFakeSecretApiKeyToNeverBeLogged12345"
+        sensitive_raw_message = "SENSITIVE_SECRET_RAW_MESSAGE_TOKEN_XYZ_98765"
+        sensitive_api_key = "AIzaSyFakeSecretApiKeyToNeverBeLogged12345"
 
-    r_chat = client.post(
-        "/api/v1/chat",
-        json={
-            "user_id": "u1",
-            "conversation_id": cid,
-            "message": f"Halo {sensitive_raw_message} secret key {sensitive_api_key}",
-        },
-    )
-    assert r_chat.status_code == 200
+        with self.assertLogs("app.api.routes_chat", level="INFO") as cm:
+            r_chat = client.post(
+                "/api/v1/chat",
+                json={
+                    "user_id": "u1",
+                    "conversation_id": cid,
+                    "message": f"Halo {sensitive_raw_message} secret key {sensitive_api_key}",
+                },
+            )
+            self.assertEqual(r_chat.status_code, 200)
 
-    # Ambil baris log JSON-lines
-    matching_records = [
-        record.getMessage().strip()
-        for record in caplog.records
-        if cid in record.getMessage()
-    ]
-    assert len(matching_records) >= 1
-    log_line = matching_records[-1]
+        # Ambil baris log JSON-lines
+        matching_records = [
+            out for out in cm.output
+            if cid in out
+        ]
+        self.assertTrue(len(matching_records) >= 1)
+        log_line = matching_records[-1]
 
-    # Pastikan raw message & API key TIDAK ada sama sekali di string log
-    assert sensitive_raw_message not in log_line, "Raw message pengguna tidak boleh ada di log!"
-    assert sensitive_api_key not in log_line, "API key tidak boleh ada di log!"
-    assert "gemini_api_key" not in log_line
-    assert "groq_api_key" not in log_line
+        # Pastikan raw message & API key TIDAK ada sama sekali di string log
+        self.assertNotIn(sensitive_raw_message, log_line, "Raw message pengguna tidak boleh ada di log!")
+        self.assertNotIn(sensitive_api_key, log_line, "API key tidak boleh ada di log!")
+        self.assertNotIn("gemini_api_key", log_line)
+        self.assertNotIn("groq_api_key", log_line)
 
-    # Pastikan keys dalam JSON-lines tepat 7 field metadata
-    meta = json.loads(log_line)
-    expected_fields = {
-        "conversation_id",
-        "route",
-        "readiness_stage",
-        "policy_action",
-        "provider",
-        "latency_ms",
-        "fallback_used",
-    }
-    assert set(meta.keys()) == expected_fields
+        # Pastikan keys dalam JSON-lines tepat 7 field metadata
+        raw_text = log_line.split(":", 2)[-1].strip() if ":" in log_line else log_line.strip()
+        meta = json.loads(raw_text)
+        expected_fields = {
+            "conversation_id",
+            "route",
+            "readiness_stage",
+            "policy_action",
+            "provider",
+            "latency_ms",
+            "fallback_used",
+        }
+        self.assertEqual(set(meta.keys()), expected_fields)
+
 
 if __name__ == "__main__":
     unittest.main()
