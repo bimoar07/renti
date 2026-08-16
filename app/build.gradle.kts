@@ -67,4 +67,6 @@ dependencies {
 
 // Jetpack Glance (Untuk Home Screen Widget SOS nantinya)
     implementation("androidx.glance:glance-appwidget:1.0.0")
+
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
 }
