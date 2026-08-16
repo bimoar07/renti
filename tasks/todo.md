@@ -44,9 +44,9 @@
 ## Hari 3 — Minggu, 16 Agustus (Demo Terverifikasi + Produksi Video + Dokumen Teknis)
 
 ### Bimo (Backend & AI)
-- [ ] Task 3.1A: Finalisasi backend hardening: timeout resilience, error mapping, metadata logging
-- [ ] Task 3.2A: Jalankan seluruh test backend → pastikan 100% hijau
-- [ ] Task 3.3A: Verifikasi 7 skenario dari klien sungguhan & dukung rekam video live
+- [x] Task 3.1A: Finalisasi backend hardening: timeout resilience, error mapping JSON terstruktur, metadata logging
+- [x] Task 3.2A: Jalankan seluruh test backend → 100% hijau (72/72)
+- [ ] Task 3.3A: Verifikasi 7 skenario dari klien sungguhan — ⚠️ smoke 6/7: skenario 7 ekspektasi perlu disesuaikan (route dipengaruhi stage yg berubah)
 
 ### Erico (Mobile & Desain)
 - [ ] Task 3.1B: **Rekam video demo ≤ 3 menit** di emulator / device asli
