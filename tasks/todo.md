@@ -23,6 +23,7 @@
 ## Hari 2 — Sabtu, 15 Agustus (Backend Hidup + Mobile Konsumsi API + Mulai Video)
 
 ### Bimo (Backend & AI)
+> 📋 Spesifikasi Hari 2 (LLM live + amplop keamanan deterministik) dirilis: issue **#2** (`ready-for-agent`) — rincian seam & asersi test di sana.
 - [ ] Task 2.1A: Readiness extractor + validator transisi deterministik MAPR (`services/readiness.py`)
 - [ ] Task 2.2A: Kontrak Provider + adapter LiteLLM (Gemini primary ↔ Groq fallback) + failure test
 - [ ] Task 2.3A: System prompts adaptif & tone mirroring (`app/prompts/companion.py`)

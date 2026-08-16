@@ -43,3 +43,9 @@ _Avoid_: Conversation memory vector, chat history dump
 **Context Tags**:
 Structured key-value metadata extracted from conversations describing current triggers, emotional states, and physical locations.
 _Avoid_: User tags, session attributes
+
+## Companion Behavior
+
+**Tone**:
+The conversational register (`casual`, `standard`, `formal`) that Renti detects from the user's message and mirrors in its replies to keep the interaction natural.
+_Avoid_: Writing style, personality, vibe

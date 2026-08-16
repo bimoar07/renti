@@ -16,6 +16,7 @@
 | **10** | **3-Zone routing** (cessation / emotional / out-of-scope) | `app/services/routing.py` |
 | **11** | **Medical boundary** (psikoedukasi vs diagnosis) | `app/services/output_guardrail.py` |
 | **12** | **Crisis escalation & signposting** (119 / 0800-177-6565) | Policy engine prioritas tertinggi |
+| **13** | **Amplop keamanan deterministik di sekeliling LLM** (LLM hanya utk konten; provider never-raise; guardrail tak ubah `policy_action`) | `services/llm_provider.py`, `services/output_guardrail.py`, `prompts/` |
 
 > **Arsitektur inti** (dari `TAHAPAN_PEMBELAJARAN_RENTI.md` §3.1):
 > raw input → canonicalize → safety triage → policy → memory update → structured extraction → transition validation → zone/intent routing → response generation → output guardrail.
