@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     llm_primary_provider: str = "gemini/gemini-2.0-flash"
     llm_fallback_provider: str = "groq/llama-3.3-70b-versatile"
+    llm_per_provider_timeout: float = 7.0
+    llm_total_deadline: float = 12.0
     # Team ID Gemastik & SQLite database path
     team_id: str = "RENTI-TEAM-01"
     db_path: str = "renti.db"
@@ -22,4 +24,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

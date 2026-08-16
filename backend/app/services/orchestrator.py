@@ -54,6 +54,8 @@ class Orchestrator:
             groq_api_key=settings.groq_api_key,
             gemini_model=settings.llm_primary_provider,
             groq_model=settings.llm_fallback_provider,
+            per_provider_timeout=settings.llm_per_provider_timeout,
+            total_deadline=settings.llm_total_deadline,
         )
         self.guardrail = guardrail or OutputGuardrail()
         self.readiness_service = readiness_service or ReadinessService()

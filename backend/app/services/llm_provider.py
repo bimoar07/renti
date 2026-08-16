@@ -7,10 +7,15 @@ Implements single entry point generate() for all Day 2 LLM consumers:
 
 Never-raise guarantee: any exception / quota error / timeout / empty response
 automatically drops one level down without bubbling up to HTTP 500.
+
+Timeout budget:
+- Per-provider timeout (~7s)
+- Total deadline budget (~12s) shared across the provider chain.
 """
 from dataclasses import dataclass
 import logging
 import re
+import time
 from typing import Any, Callable, Optional
 
 try:
@@ -37,14 +42,21 @@ class LLMProvider:
         groq_api_key: Optional[str] = None,
         gemini_model: str = "gemini/gemini-2.0-flash",
         groq_model: str = "groq/llama-3.3-70b-versatile",
-        timeout: float = 10.0,
+        per_provider_timeout: float = 7.0,
+        total_deadline: float = 12.0,
+        timeout: Optional[float] = None,
         fallback_handler: Optional[Callable[[str, list[dict[str, str]]], str]] = None,
     ):
         self.gemini_api_key = (gemini_api_key or "").strip()
         self.groq_api_key = (groq_api_key or "").strip()
         self.gemini_model = gemini_model
         self.groq_model = groq_model
-        self.timeout = timeout
+        if timeout is not None:
+            self.per_provider_timeout = timeout
+        else:
+            self.per_provider_timeout = per_provider_timeout
+        self.timeout = self.per_provider_timeout
+        self.total_deadline = total_deadline
         self.fallback_handler = fallback_handler
 
     def generate(
@@ -55,16 +67,22 @@ class LLMProvider:
     ) -> ProviderResult:
         """Call LLM with Zero-Crash fallback cascade: Gemini -> Groq -> template."""
         full_messages = [{"role": "system", "content": system_prompt}] + messages
+        start_time = time.monotonic()
+        deadline = start_time + self.total_deadline
 
         # 1. Try Primary: Gemini
-        if self.gemini_api_key and completion is not None:
+        remaining = deadline - time.monotonic()
+        if remaining > 0 and self.gemini_api_key and completion is not None:
+            call_timeout = min(self.per_provider_timeout, remaining)
             try:
+                call_kwargs = dict(kwargs)
+                call_kwargs.pop("timeout", None)
                 response = completion(
                     model=self.gemini_model,
                     messages=full_messages,
                     api_key=self.gemini_api_key,
-                    timeout=self.timeout,
-                    **kwargs,
+                    timeout=call_timeout,
+                    **call_kwargs,
                 )
                 text = self._extract_text(response)
                 if text:
@@ -76,16 +94,22 @@ class LLMProvider:
                 logger.warning("Gemini returned empty response, falling back to Groq")
             except Exception as exc:
                 logger.warning("Gemini call failed (%s), falling back to Groq", exc)
+        elif self.gemini_api_key and remaining <= 0:
+            logger.warning("Total deadline budget exceeded before calling Gemini (%.2fs remaining)", remaining)
 
         # 2. Try Secondary: Groq
-        if self.groq_api_key and completion is not None:
+        remaining = deadline - time.monotonic()
+        if remaining > 0 and self.groq_api_key and completion is not None:
+            call_timeout = min(self.per_provider_timeout, remaining)
             try:
+                call_kwargs = dict(kwargs)
+                call_kwargs.pop("timeout", None)
                 response = completion(
                     model=self.groq_model,
                     messages=full_messages,
                     api_key=self.groq_api_key,
-                    timeout=self.timeout,
-                    **kwargs,
+                    timeout=call_timeout,
+                    **call_kwargs,
                 )
                 text = self._extract_text(response)
                 if text:
@@ -97,8 +121,10 @@ class LLMProvider:
                 logger.warning("Groq returned empty response, falling back to template")
             except Exception as exc:
                 logger.warning("Groq call failed (%s), falling back to template", exc)
+        elif self.groq_api_key and remaining <= 0:
+            logger.warning("Total deadline budget exceeded before calling Groq (%.2fs remaining)", remaining)
 
-        # 3. Deterministic Fallback (Offline / No Key / All Providers Failed)
+        # 3. Deterministic Fallback (Offline / No Key / All Providers Failed / Deadline Exceeded)
         if self.fallback_handler:
             fallback_text = self.fallback_handler(system_prompt, messages)
         else:
