@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # API keys live only in .env (never committed). Empty => mock/offline mode for dev.
     gemini_api_key: str = ""
     groq_api_key: str = ""
-    llm_primary_provider: str = "gemini/gemini-flash-latest"
+    llm_primary_provider: str = "gemini/gemini-3.5-flash-lite"
     llm_fallback_provider: str = "groq/llama-3.3-70b-versatile"
     llm_per_provider_timeout: float = 7.0
     llm_total_deadline: float = 12.0
