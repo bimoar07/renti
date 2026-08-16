@@ -1,4 +1,7 @@
 """HTTP routes untuk chatbot Renti (health, conversations, chat)."""
+import json
+import logging
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -9,10 +12,10 @@ from app.schemas.chat import (
     ChatResponse,
     ConversationCreate,
     ConversationResponse,
-    MemoryInfo,
-    ProviderInfo,
 )
 from app.services.orchestrator import Orchestrator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
@@ -35,4 +38,20 @@ async def create_conversation(payload: ConversationCreate):
 async def chat(payload: ChatRequest):
     if not _orchestrator.conversation_exists(payload.conversation_id):
         raise HTTPException(status_code=404, detail="conversation not found; create it first")
-    return _orchestrator.process(payload)
+
+    start_time = time.perf_counter()
+    resp = _orchestrator.process(payload)
+    latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+    metadata = {
+        "conversation_id": resp.conversation_id,
+        "route": resp.route,
+        "readiness_stage": resp.readiness_stage,
+        "policy_action": resp.policy_action,
+        "provider": resp.provider.name,
+        "latency_ms": latency_ms,
+        "fallback_used": resp.provider.fallback_used,
+    }
+    logger.info(json.dumps(metadata))
+
+    return resp
