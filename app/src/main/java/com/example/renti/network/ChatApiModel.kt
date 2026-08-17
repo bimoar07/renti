@@ -2,6 +2,19 @@ package com.example.renti.network
 
 import com.google.gson.annotations.SerializedName
 
+// Conversation Creation
+data class ConversationCreateRequest(
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("readiness_stage") val readinessStage: String? = null
+)
+
+data class ConversationResponse(
+    @SerializedName("conversation_id") val conversationId: String,
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("readiness_stage") val readinessStage: String,
+    @SerializedName("created_at") val createdAt: String
+)
+
 // Request payload
 data class ChatRequest(
     @SerializedName("user_id") val userId: String,

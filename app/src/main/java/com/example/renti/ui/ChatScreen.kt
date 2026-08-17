@@ -9,17 +9,44 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.renti.ui.theme.RentiTheme
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Stateful ChatScreen yang terhubung ke ChatViewModel.
+ */
 @Composable
-fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
-    var inputText by remember { mutableStateOf("") }
+fun ChatScreen(
+    modifier: Modifier = Modifier,
+    viewModel: ChatViewModel = viewModel()
+) {
     val isLoading by viewModel.isLoading.collectAsState()
 
+    ChatContent(
+        messages = viewModel.messages,
+        isLoading = isLoading,
+        onSendMessage = { text -> viewModel.sendMessage(text) },
+        modifier = modifier
+    )
+}
+
+/**
+ * Stateless ChatContent untuk rendering murni UI dan Compose Preview.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatContent(
+    messages: List<ChatMessage>,
+    isLoading: Boolean,
+    onSendMessage: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var inputText by remember { mutableStateOf("") }
+
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text("Teman Curhat") },
@@ -42,7 +69,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 contentPadding = PaddingValues(vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(viewModel.messages) { msg ->
+                items(messages) { msg ->
                     ChatBubble(msg)
                 }
             }
@@ -72,8 +99,10 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
                     onClick = {
-                        viewModel.sendMessage(inputText)
-                        inputText = ""
+                        if (inputText.isNotBlank()) {
+                            onSendMessage(inputText)
+                            inputText = ""
+                        }
                     },
                     enabled = !isLoading && inputText.isNotBlank()
                 ) {
@@ -87,9 +116,9 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
 @Composable
 fun ChatBubble(message: ChatMessage) {
     val bubbleColor = when {
-        message.isCrisis -> MaterialTheme.colorScheme.errorContainer // Merah jika krisis
-        message.isUser -> MaterialTheme.colorScheme.primary          // Oranye jika user
-        else -> MaterialTheme.colorScheme.surfaceVariant             // Abu-abu jika AI
+        message.isCrisis -> MaterialTheme.colorScheme.errorContainer // Merah jika krisis (Signposting)
+        message.isUser -> MaterialTheme.colorScheme.primary          // Oranye/Primary jika user
+        else -> MaterialTheme.colorScheme.surfaceVariant             // Netral jika AI
     }
 
     val textColor = when {
@@ -111,6 +140,34 @@ fun ChatBubble(message: ChatMessage) {
                     shape = RoundedCornerShape(16.dp)
                 )
                 .padding(12.dp)
+        )
+    }
+}
+
+@Preview(showBackground = true, showSystemUi = true)
+@Composable
+fun ChatScreenPreview() {
+    val mockMessages = listOf(
+        ChatMessage(
+            text = "Halo Renti, aku lagi pengin banget ngerokok di warkop.",
+            isUser = true
+        ),
+        ChatMessage(
+            text = "Aku paham banget godaannya saat di warkop. Coba teknik 4-7-8 dulu atau minum air putih dingin ya. Kamu sudah bertahan sejauh ini!",
+            isUser = false
+        ),
+        ChatMessage(
+            text = "Peringatan: Jika Anda sedang berada dalam kondisi darurat kesehatan, segera hubungi Layanan Berhenti Merokok Kemenkes 0-800-177-6565 atau 119.",
+            isUser = false,
+            isCrisis = true
+        )
+    )
+
+    RentiTheme {
+        ChatContent(
+            messages = mockMessages,
+            isLoading = false,
+            onSendMessage = {}
         )
     }
 }
