@@ -1,5 +1,7 @@
 package com.example.renti.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,8 +12,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -47,7 +51,7 @@ fun ChatContent(
     onSendMessage: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var inputText by remember { mutableStateOf("") }
+    var inputText by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
 
     // Otomatis scroll ke pesan terbawah setiap kali ada pesan baru
@@ -140,14 +144,18 @@ fun ChatContent(
 
 @Composable
 fun ChatBubble(message: ChatMessage) {
+    val context = LocalContext.current
+
     val bubbleColor = when {
         message.isCrisis -> MaterialTheme.colorScheme.errorContainer // Merah jika krisis (Signposting)
+        message.isNetworkError -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
         message.isUser -> MaterialTheme.colorScheme.primary          // Oranye/Primary jika user
         else -> MaterialTheme.colorScheme.surfaceVariant             // Netral jika AI
     }
 
     val textColor = when {
         message.isCrisis -> MaterialTheme.colorScheme.onErrorContainer
+        message.isNetworkError -> MaterialTheme.colorScheme.error
         message.isUser -> MaterialTheme.colorScheme.onPrimary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -156,16 +164,38 @@ fun ChatBubble(message: ChatMessage) {
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = if (message.isUser) Alignment.CenterEnd else Alignment.CenterStart
     ) {
-        Text(
-            text = message.text,
-            color = textColor,
+        Column(
             modifier = Modifier
+                .widthIn(max = 320.dp)
                 .background(
                     color = bubbleColor,
                     shape = RoundedCornerShape(16.dp)
                 )
                 .padding(12.dp)
-        )
+        ) {
+            Text(
+                text = message.text,
+                color = textColor,
+                style = MaterialTheme.typography.bodyMedium
+            )
+
+            // Jika mode krisis (Signposting), sediakan tombol cepat panggilan darurat 119
+            if (message.isCrisis) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:119"))
+                        context.startActivity(dialIntent)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text("📞 Hubungi Hotline 119", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
     }
 }
 

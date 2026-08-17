@@ -6,15 +6,25 @@ import androidx.lifecycle.viewModelScope
 import com.example.renti.network.ChatRequest
 import com.example.renti.network.ClientContext
 import com.example.renti.network.ConversationCreateRequest
+import com.example.renti.network.RentiApiService
 import com.example.renti.network.RetrofitClient
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
-data class ChatMessage(val text: String, val isUser: Boolean, val isCrisis: Boolean = false)
+data class ChatMessage(
+    val text: String,
+    val isUser: Boolean,
+    val isCrisis: Boolean = false,
+    val isNetworkError: Boolean = false
+)
 
-class ChatViewModel : ViewModel() {
+class ChatViewModel(
+    private val apiService: RentiApiService = RetrofitClient.apiService
+) : ViewModel() {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -23,24 +33,27 @@ class ChatViewModel : ViewModel() {
 
     private val userId = "demo-user-001"
     private var conversationId: String? = null
+    private val sessionMutex = Mutex()
 
     init {
         // Otomatis inisialisasi sesi percakapan saat ViewModel aktif
-        initConversationSession()
-    }
-
-    fun initConversationSession(onComplete: (() -> Unit)? = null) {
         viewModelScope.launch {
             try {
-                val response = RetrofitClient.apiService.createConversation(
-                    ConversationCreateRequest(
-                        userId = userId
-                    )
+                getOrCreateConversationId()
+            } catch (_: Exception) {
+                // Sesi akan dibuat ulang secara transparan saat pesan pertama dikirim
+            }
+        }
+    }
+
+    suspend fun getOrCreateConversationId(): String {
+        return sessionMutex.withLock {
+            conversationId ?: run {
+                val response = apiService.createConversation(
+                    ConversationCreateRequest(userId = userId)
                 )
                 conversationId = response.conversationId
-                onComplete?.invoke()
-            } catch (e: Exception) {
-                // Sesi akan diinisialisasi ulang secara otomatis saat pengiriman pesan pertama
+                response.conversationId
             }
         }
     }
@@ -54,16 +67,8 @@ class ChatViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                // 2. Pastikan sesi percakapan terdaftar di backend
-                val activeConvId = conversationId ?: run {
-                    val convResp = RetrofitClient.apiService.createConversation(
-                        ConversationCreateRequest(
-                            userId = userId
-                        )
-                    )
-                    conversationId = convResp.conversationId
-                    convResp.conversationId
-                }
+                // 2. Dapatkan ID percakapan aktif secara tersinkronisasi
+                val activeConvId = getOrCreateConversationId()
 
                 // 3. Siapkan payload sesuai kontrak
                 val request = ChatRequest(
@@ -74,7 +79,7 @@ class ChatViewModel : ViewModel() {
                 )
 
                 // 4. Panggil endpoint chat
-                val response = RetrofitClient.apiService.sendMessage(request)
+                val response = apiService.sendMessage(request)
 
                 // Cek apakah balasan merupakan peringatan krisis darurat (Signposting)
                 val isCrisisMode = response.policyAction == "BLOCK_AND_SIGNPOST"
@@ -86,9 +91,10 @@ class ChatViewModel : ViewModel() {
                 ))
             } catch (e: Exception) {
                 messages.add(ChatMessage(
-                    text = "Gagal terhubung ke Teman Curhat. Pastikan server aktif (${e.localizedMessage ?: "Network Error"}).",
+                    text = "Tidak dapat terhubung ke Teman Curhat. Pastikan koneksi internet atau server demo backend aktif.",
                     isUser = false,
-                    isCrisis = true
+                    isCrisis = false,
+                    isNetworkError = true
                 ))
             } finally {
                 _isLoading.value = false

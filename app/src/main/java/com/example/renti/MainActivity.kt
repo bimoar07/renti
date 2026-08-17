@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -40,12 +41,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainAppScreen() {
-    var selectedItem by remember { mutableStateOf(RentiNavigationItem.CHAT) }
+    var selectedItem by rememberSaveable { mutableStateOf(RentiNavigationItem.CHAT) }
 
     Scaffold(
         bottomBar = {
             NavigationBar {
-                RentiNavigationItem.values().forEach { item ->
+                RentiNavigationItem.entries.forEach { item ->
                     NavigationBarItem(
                         selected = selectedItem == item,
                         onClick = { selectedItem = item },
